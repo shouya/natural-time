@@ -17,7 +17,7 @@ defmodule NaturalTime do
   @day_offset_pat "(?<day_offset>(this|next))"
   @day_of_week_pat "(?<day_of_week>(monday|tuesday|wednesday|thursday|friday|saturday|sunday))"
   @time_of_day_pat "(?<time_of_day>(morning|noon|afternoon|evening|night|midnight))"
-  @period_pat "(?<period>(am|pm|(((at|in) the )?#{@time_of_day_pat})))"
+  @period_pat "(?<period>(am|pm|a\\.m\\.|p\\.m\\.|(((at|in) the )?#{@time_of_day_pat})))"
   @time_pat "(?<hr>\\d{1,2})(:(?<min>\\d{1,2}))?\\s*#{@period_pat}"
   @day_pat "(#{@day_name_pat}|(#{@day_offset_pat}|on)\\s+#{@day_of_week_pat})"
   @duration_pat "(?<dur_num>a|\d+)\s*(?<dur_unit>hrs?|hours?|mins?|minutes?)"
@@ -53,9 +53,9 @@ defmodule NaturalTime do
       |> Enum.map(fn {k, v} -> {k, String.downcase(v)} end)
       |> Map.new()
 
-    [:date, :hour, :minute, :period]
-    |> Enum.map(&{&1, resolve_capture(captures, &1, now)})
-    |> combine()
+    [:date, :time]
+    |> Enum.map(&resolve_capture(captures, &1, now))
+    |> combine(now)
   end
 
   defp resolve_capture(captures, :date, now) do
@@ -70,27 +70,43 @@ defmodule NaturalTime do
           _ -> nil
         end
 
-      is_binary(day_offset) and is_binary(day_of_week) ->
+      is_binary(day_of_week) ->
         case parse_day_of_week(day_of_week, day_offset, now) do
           %{year: _, month: _, day: _} = date -> date
           _ -> nil
         end
+
+      true ->
+        nil
     end
   end
 
-  defp resolve_capture(cap, :hour, now) do
-    nil
+  defp resolve_capture(captures, :time, now) do
+    [hour, minute, second] =
+      ~w"hr min sec"
+      |> Enum.map(fn unit ->
+        captures[unit]
+        |> case do
+          nil -> nil
+          s -> Integer.parse(s)
+        end
+        |> case do
+          {n, ""} -> n
+          _ -> nil
+        end
+      end)
+
+    case resolve_period_and_hour(captures["period"], hour) do
+      nil -> nil
+      hour -> resolve_hms(hour, minute, second)
+    end
   end
 
-  defp resolve_capture(cap, :minute, now) do
-    nil
-  end
-
-  defp resolve_capture(cap, :period, now) do
-    nil
-  end
-
-  defp combine(time) do
+  defp combine([date, time], now) do
+    date = date || %{}
+    time = time || %{}
+    datetime = Map.merge(date, time) |> Keyword.new()
+    Timex.set(now, datetime)
   end
 
   defp parse_day("today", now) do
@@ -132,4 +148,35 @@ defmodule NaturalTime do
       offset -> now |> Timex.shift(days: offset) |> Map.take([:year, :month, :day])
     end
   end
+
+  defp parse_period(period) when period in ~w[am a.m. morning], do: "am"
+  defp parse_period(period) when period in ~w[pm p.m. afternoon evening night], do: "pm"
+  defp parse_period(period) when period in ~w[midnight], do: "midnight"
+  defp parse_period(period) when period in ~w[noon], do: "noon"
+  defp parse_period(nil), do: nil
+
+  defp resolve_period_and_hour(period, hour) do
+    period = parse_period(period)
+
+    case {period, hour} do
+      {_, hour} when hour in 13..23 -> hour
+      {nil, hour} -> hour
+      {"midnight", hour} when hour in 0..3 -> hour
+      {"midnight", hour} when hour in 11..12 -> rem(hour + 12, 24)
+      {"noon", hour} when hour in 11..12 -> hour
+      {"noon", 1} -> 13
+      {"am", hour} when hour in 1..12 -> rem(hour, 12)
+      {"pm", hour} when hour in 1..12 -> rem(hour, 12) + 12
+      _ -> nil
+    end
+  end
+
+  defp resolve_hms(h, nil, nil),
+    do: %{hour: h, minute: 0, second: 0}
+
+  defp resolve_hms(h, m, nil) when is_integer(m),
+    do: %{hour: h, minute: m, second: 0}
+
+  defp resolve_hms(h, m, s) when is_integer(m) and is_integer(s),
+    do: %{hour: h, minute: m, second: s}
 end
