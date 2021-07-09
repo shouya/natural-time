@@ -4,7 +4,7 @@ defmodule NaturalTime.MixProject do
   def project do
     [
       app: :natural_time,
-      version: "0.1.0",
+      version: "0.1.1",
       elixir: "~> 1.8",
       description: "A simple parser for datetime in natural language",
       start_permanent: Mix.env() == :prod,
@@ -34,7 +34,7 @@ defmodule NaturalTime.MixProject do
       files: ~w(lib .formatter.exs mix.exs README*),
       licenses: ["MIT"],
       links: %{
-        "github" => "https://github.com/shouya/natural-time"
+        "GitHub" => "https://github.com/shouya/natural-time"
       }
     ]
   end
