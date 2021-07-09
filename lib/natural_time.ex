@@ -17,7 +17,7 @@ defmodule NaturalTime do
     )
 
   with_optional_prep = fn p ->
-    concat(replace(preposition |> concat(ws), ""), p)
+    concat(ignore(replace(preposition |> concat(ws), "")), p)
   end
 
   ampm =
@@ -27,8 +27,12 @@ defmodule NaturalTime do
         string("pm"),
         replace(string("a.m."), "am"),
         replace(string("p.m."), "pm"),
+        replace(string("midnight"), "am"),
         replace(string("morning"), "am"),
-        replace(string("afternoon"), "am")
+        replace(string("noon"), "pm"),
+        replace(string("afternoon"), "pm"),
+        replace(string("evening"), "pm"),
+        replace(string("night"), "pm")
       ])
     )
 
@@ -62,16 +66,19 @@ defmodule NaturalTime do
   rel_adv = choice([string("this"), string("next")])
 
   time =
-    choice([
-      int2
-      |> concat(ignore(string(":")))
-      |> concat(int2)
-      |> concat(ws)
-      |> concat(ampm)
-      |> tag(:hm_ap),
-      int2 |> concat(ws) |> concat(ampm) |> tag(:h_ap),
-      int2 |> concat(ignore(string(":"))) |> concat(int2) |> tag(:hm)
-    ])
+    with_optional_prep.(
+      choice([
+        int2
+        |> concat(ignore(string(":")))
+        |> concat(int2)
+        |> concat(ws)
+        |> concat(ampm)
+        |> tag(:hm_ap),
+        int2 |> concat(ws) |> concat(ampm) |> tag(:h_ap),
+        int2 |> concat(ignore(string(":"))) |> concat(int2) |> tag(:hm),
+        int2 |> tag(:h)
+      ])
+    )
 
   day =
     choice([
@@ -165,6 +172,12 @@ defmodule NaturalTime do
   defp parse_time(now, hm: [h, m]) do
     now
     |> Timex.set(hour: h, minute: m, second: 0)
+    |> to_time()
+  end
+
+  defp parse_time(now, h: [h]) do
+    now
+    |> Timex.set(hour: h, minute: 0, second: 0)
     |> to_time()
   end
 

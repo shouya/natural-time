@@ -14,6 +14,11 @@ defmodule NaturalTimeTest do
   end
 
   def assert_parse(nat, actual) do
-    assert parse(nat, @now) == Timex.parse!(actual, "{ISO:Extended}")
+    if parse(nat, @now) == Timex.parse!(actual, "{ISO:Extended}") do
+      :ok
+    else
+      IO.puts(nat)
+      assert parse(nat, @now) == Timex.parse!(actual, "{ISO:Extended}")
+    end
   end
 end
