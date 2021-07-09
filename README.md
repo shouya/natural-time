@@ -24,7 +24,7 @@ That being said, these formats should be relatively simple to add and I will wel
 
 ## Installation
 
-Find the latest version on hex and include it in your `mix.exs` as such.
+Find the latest version on [hex](https://hex.pm/packages/natural_time) and include it in your `mix.exs` as such.
 
 ```elixir
 def deps do
@@ -56,4 +56,4 @@ Example usage:
 def parse(str, rel \\ Timex.now())
 ```
 
-It spits out `nil` if the string cannot be parsed. Otherwise a DateTime object will be returned. Check out the tests for how to use it.
+It spits out `nil` if the string cannot be parsed. Otherwise a DateTime object will be returned. Check out the [tests](https://github.com/shouya/natural-time/blob/master/test/natural_time_test.exs) for extra examples.
