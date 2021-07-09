@@ -93,7 +93,7 @@ defmodule NaturalTime do
       ])
     )
 
-  defparsec(
+  defparsecp(
     :datetime,
     choice([
       day |> concat(ws) |> concat(time) |> tag(:day_time),
