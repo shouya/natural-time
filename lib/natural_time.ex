@@ -23,11 +23,11 @@ defmodule NaturalTime do
   @duration_pat "(?<dur_num>a|\d+)\s*(?<dur_unit>hrs?|hours?|mins?|minutes?)"
 
   @all_patterns [
-    ~r/at #{@time_pat}/i,
     ~r/#{@day_pat}/i,
     ~r/#{@day_pat}( at)?\s+#{@time_pat}/i,
     ~r/(in|after) #{@duration_pat}/i,
-    ~r/#{@duration_pat} (from now|later)/i
+    ~r/#{@duration_pat} (from now|later)/i,
+    ~r/at #{@time_pat}/i,
   ]
 
   @spec parse(String.t(), DateTime.t()) ::
