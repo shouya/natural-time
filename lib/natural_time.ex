@@ -102,6 +102,20 @@ defmodule NaturalTime do
     ])
   )
 
+  @doc """
+  Specify a string and a DateTime object indicating the reference time.
+
+  The timezone information in the reference time will be used for
+  inference. For example, if the reference time has timezone of
+  "UTC+1", then "2pm" will parse to 2pm in UTC+1 timezone.
+
+  Example usage:
+
+      iex> now = Timex.parse!("2019-06-02T01:04:21+08:00", "{ISO:Extended}")
+      iex> parse("10pm", now) == Timex.parse!("2019-06-02T22:00:00+08:00", "{ISO:Extended}")
+      true
+  """
+  @spec parse(String.t(), DateTime.t()) :: nil | DateTime.t()
   def parse(str, rel \\ Timex.now()) do
     str = str |> String.downcase() |> String.trim()
 
