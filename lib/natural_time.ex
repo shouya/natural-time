@@ -63,7 +63,11 @@ defmodule NaturalTime do
       ])
     )
 
-  rel_adv = choice([string("this"), string("next")])
+  rel_adv =
+    choice([
+      string("this"),
+      times(string("next") |> ignore(ws), min: 1, max: 3)
+    ])
 
   time =
     with_optional_prep.(
@@ -81,11 +85,13 @@ defmodule NaturalTime do
     )
 
   day =
-    choice([
-      rel_day |> tag(:rel_day),
-      rel_adv |> concat(ws) |> concat(weekday) |> tag(:rel_weekday),
-      weekday |> tag(:weekday)
-    ])
+    with_optional_prep.(
+      choice([
+        rel_day |> tag(:rel_day),
+        rel_adv |> concat(ws) |> concat(weekday) |> tag(:rel_weekday),
+        weekday |> tag(:weekday)
+      ])
+    )
 
   defparsec(
     :datetime,
@@ -147,6 +153,19 @@ defmodule NaturalTime do
         "this" -> target_day - curr_day
         "next" -> target_day + 7 - curr_day
       end
+
+    now
+    |> Timex.to_date()
+    |> Timex.shift(days: offset)
+  end
+
+  defp parse_day(now, rel_weekday: ["next", "next" | rest]) do
+    weekday = List.last(rest)
+    curr_day = Timex.weekday(now)
+    target_day = Timex.day_to_num(weekday)
+    next_count = Enum.count(rest) + 1
+
+    offset = target_day + next_count * 7 - curr_day
 
     now
     |> Timex.to_date()
