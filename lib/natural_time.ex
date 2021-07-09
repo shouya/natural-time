@@ -1,182 +1,174 @@
 defmodule NaturalTime do
-  @moduledoc """
-  Parse natural language time expression
-  """
+  import NimbleParsec
 
-  @type parse_error_t :: :not_found
+  ws = string(" ") |> repeat() |> ignore()
+  int2 = integer(min: 1, max: 2)
 
-  @type segment_info_t :: :period | :day | :hour | :minute | :second
+  preposition =
+    optional(
+      choice([
+        string("in the"),
+        string("on the"),
+        string("at the"),
+        string("in"),
+        string("on"),
+        string("at")
+      ])
+    )
 
-  @type datetime_info_t ::
-          {:exact, DateTime.t()}
-          | {:ambiguous, DateTime.t(), [segment_info_t]}
-  @type match_info_t ::
-          {begin :: non_neg_integer(), length :: non_neg_integer()}
-
-  @day_name_pat "(?<day>(today|tomorrow|yesterday))"
-  @day_offset_pat "(?<day_offset>(this|next))"
-  @day_of_week_pat "(?<day_of_week>(monday|tuesday|wednesday|thursday|friday|saturday|sunday))"
-  @time_of_day_pat "(?<time_of_day>(morning|noon|afternoon|evening|night|midnight))"
-  @period_pat "(?<period>(am|pm|a\\.m\\.|p\\.m\\.|(((at|in) the )?#{@time_of_day_pat})))"
-  @time_pat "(?<hr>\\d{1,2})(:(?<min>\\d{1,2}))?\\s*#{@period_pat}"
-  @day_pat "(#{@day_name_pat}|(#{@day_offset_pat}|on)\\s+#{@day_of_week_pat})"
-  @duration_pat "(?<dur_num>a|\d+)\s*(?<dur_unit>hrs?|hours?|mins?|minutes?)"
-
-  @all_patterns [
-    ~r/#{@day_pat}/i,
-    ~r/#{@day_pat}( at)?\s+#{@time_pat}/i,
-    ~r/(in|after) #{@duration_pat}/i,
-    ~r/#{@duration_pat} (from now|later)/i,
-    ~r/at #{@time_pat}/i,
-  ]
-
-  @spec parse(String.t(), DateTime.t()) ::
-          {:ok, {datetime_info_t, match_info_t}} | {:error, parse_error_t}
-  def parse(input, now \\ Timex.local()) do
-    @all_patterns
-    |> Stream.map(&Regex.named_captures(&1, input))
-    |> Enum.reduce(:not_found, fn
-      nil, :not_found -> :not_found
-      cap, :not_found -> {:found, cap}
-      _, {:found, cap} -> {:found, cap}
-    end)
-    |> case do
-      {:found, cap} -> resolve_capture(cap, now)
-      :not_found -> {:error, :not_found}
-    end
+  with_optional_prep = fn p ->
+    concat(replace(preposition |> concat(ws), ""), p)
   end
 
-  defp resolve_capture(captures, now) do
-    captures =
-      captures
-      |> Enum.reject(fn {_k, v} -> v == "" end)
-      |> Enum.map(fn {k, v} -> {k, String.downcase(v)} end)
-      |> Map.new()
+  ampm =
+    with_optional_prep.(
+      choice([
+        string("am"),
+        string("pm"),
+        replace(string("a.m."), "am"),
+        replace(string("p.m."), "pm"),
+        replace(string("morning"), "am"),
+        replace(string("afternoon"), "am")
+      ])
+    )
 
-    [:date, :time]
-    |> Enum.map(&resolve_capture(captures, &1, now))
-    |> combine(now)
-  end
+  rel_day =
+    choice([
+      string("today"),
+      string("tomorrow"),
+      replace(string("tmr"), "tomorrow")
+    ])
 
-  defp resolve_capture(captures, :date, now) do
-    [day, day_of_week, day_offset] =
-      ~w"day day_of_week day_offset"
-      |> Enum.map(&captures[&1])
+  weekday =
+    with_optional_prep.(
+      choice([
+        string("monday"),
+        string("tuesday"),
+        string("wednesday"),
+        string("thursday"),
+        string("friday"),
+        string("saturday"),
+        string("sunday"),
+        replace(string("mon"), "monday"),
+        replace(string("tue"), "tuesday"),
+        replace(string("wed"), "wednesday"),
+        replace(string("thu"), "thursday"),
+        replace(string("fri"), "friday"),
+        replace(string("sat"), "saturday"),
+        replace(string("sun"), "sunday")
+      ])
+    )
 
-    cond do
-      is_binary(day) ->
-        case parse_day(day, now) do
-          %{year: _, month: _, day: _} = date -> date
-          _ -> nil
-        end
+  rel_adv = choice([string("this"), string("next")])
 
-      is_binary(day_of_week) ->
-        case parse_day_of_week(day_of_week, day_offset, now) do
-          %{year: _, month: _, day: _} = date -> date
-          _ -> nil
-        end
+  time =
+    choice([
+      int2
+      |> concat(ignore(string(":")))
+      |> concat(int2)
+      |> concat(ws)
+      |> concat(ampm)
+      |> tag(:hm_ap),
+      int2 |> concat(ws) |> concat(ampm) |> tag(:h_ap),
+      int2 |> concat(ignore(string(":"))) |> concat(int2) |> tag(:hm)
+    ])
 
-      true ->
+  day =
+    choice([
+      rel_day |> tag(:rel_day),
+      rel_adv |> concat(ws) |> concat(weekday) |> tag(:rel_weekday),
+      weekday |> tag(:weekday)
+    ])
+
+  defparsec(
+    :datetime,
+    choice([
+      day |> concat(ws) |> concat(time) |> tag(:day_time),
+      time |> concat(ws) |> concat(day) |> tag(:time_day),
+      time |> tag(:time_only)
+    ])
+  )
+
+  def parse(str, rel \\ Timex.now()) do
+    str = str |> String.downcase() |> String.trim()
+
+    case datetime(str) do
+      {:ok, result, "", _, _, _} ->
+        parse_datetime(rel, result)
+
+      _ ->
         nil
     end
   end
 
-  defp resolve_capture(captures, :time, now) do
-    [hour, minute, second] =
-      ~w"hr min sec"
-      |> Enum.map(fn unit ->
-        captures[unit]
-        |> case do
-          nil -> nil
-          s -> Integer.parse(s)
-        end
-        |> case do
-          {n, ""} -> n
-          _ -> nil
-        end
-      end)
-
-    case resolve_period_and_hour(captures["period"], hour) do
-      nil -> nil
-      hour -> resolve_hms(hour, minute, second)
-    end
+  defp parse_datetime(now, day_time: [day, time]) do
+    date = parse_day(now, [day])
+    time = parse_time(now, [time])
+    Timex.set(now, date: date, time: time)
   end
 
-  defp combine([date, time], now) do
-    date = date || %{}
-    time = time || %{}
-    datetime = Map.merge(date, time) |> Keyword.new()
-    Timex.set(now, datetime)
+  defp parse_datetime(now, time_day: [time, day]) do
+    date = parse_day(now, [day])
+    time = parse_time(now, [time])
+    Timex.set(now, date: date, time: time)
   end
 
-  defp parse_day("today", now) do
-    # Consider ambiguity:
-    # now=1:00am -> should ask if today or yesterday
-    Map.take(now, [:year, :month, :day])
+  defp parse_datetime(now, time_only: [time]) do
+    time = parse_time(now, [time])
+    Timex.set(now, time: time)
   end
 
-  defp parse_day("tomorrow", now) do
-    # Consider ambiguity:
-    # now=1:00am -> should ask if today or tomorrow
-    now |> Timex.shift(days: 1) |> Map.take([:year, :month, :day])
+  defp parse_day(now, rel_day: ["today"]) do
+    Timex.to_date(now)
   end
 
-  defp parse_day("yesterday", now) do
-    # Consider ambiguity:
-    # now=1:00am -> should ask if today or yesterday
-    now |> Timex.shift(days: -1) |> Map.take([:year, :month, :day])
+  defp parse_day(now, rel_day: ["tomorrow"]) do
+    now |> Timex.to_date() |> Timex.shift(days: 1)
   end
 
-  defp parse_day_of_week(day_of_week, day_offset, now) do
+  defp parse_day(now, weekday: [weekday]) do
+    parse_day(now, rel_weekday: ["", weekday])
+  end
+
+  defp parse_day(now, rel_weekday: [adv, weekday]) do
     curr_day = Timex.weekday(now)
-    target_day = Timex.day_to_num(day_of_week)
+    target_day = Timex.day_to_num(weekday)
 
-    case day_offset do
-      "this" ->
-        if target_day < curr_day, do: nil, else: target_day - curr_day
+    offset =
+      case adv do
+        "" -> rem(target_day - curr_day + 7, 7)
+        "this" -> target_day - curr_day
+        "next" -> target_day + 7 - curr_day
+      end
 
-      "next" ->
-        target_day + 7 - curr_day
-
-      nil ->
-        ## Consider ambiguity:
-        ## now=mon, target=on mon -> should ask this mon or next mon
-        if curr_day == target_day, do: nil, else: rem(target_day - curr_day + 7, 7)
-    end
-    |> case do
-      nil -> nil
-      offset -> now |> Timex.shift(days: offset) |> Map.take([:year, :month, :day])
-    end
+    now
+    |> Timex.to_date()
+    |> Timex.shift(days: offset)
   end
 
-  defp parse_period(period) when period in ~w[am a.m. morning], do: "am"
-  defp parse_period(period) when period in ~w[pm p.m. afternoon evening night], do: "pm"
-  defp parse_period(period) when period in ~w[midnight], do: "midnight"
-  defp parse_period(period) when period in ~w[noon], do: "noon"
-  defp parse_period(nil), do: nil
-
-  defp resolve_period_and_hour(period, hour) do
-    period = parse_period(period)
-
-    case {period, hour} do
-      {_, hour} when hour in 13..23 -> hour
-      {nil, hour} -> hour
-      {"midnight", hour} when hour in 0..3 -> hour
-      {"midnight", hour} when hour in 11..12 -> rem(hour + 12, 24)
-      {"noon", hour} when hour in 11..12 -> hour
-      {"noon", 1} -> 13
-      {"am", hour} when hour in 1..12 -> rem(hour, 12)
-      {"pm", hour} when hour in 1..12 -> rem(hour, 12) + 12
-      _ -> nil
-    end
+  defp parse_time(now, h_ap: [h, ap]) do
+    parse_time(now, hm_ap: [h, 0, ap])
   end
 
-  defp resolve_hms(h, nil, nil),
-    do: %{hour: h, minute: 0, second: 0}
+  defp parse_time(now, hm_ap: [h, m, "am"]) do
+    now
+    |> Timex.set(hour: rem(h, 12), minute: m, second: 0)
+    |> to_time()
+  end
 
-  defp resolve_hms(h, m, nil) when is_integer(m),
-    do: %{hour: h, minute: m, second: 0}
+  defp parse_time(now, hm_ap: [h, m, "pm"]) do
+    now
+    |> Timex.set(hour: rem(h, 12) + 12, minute: m, second: 0)
+    |> to_time()
+  end
 
-  defp resolve_hms(h, m, s) when is_integer(m) and is_integer(s),
-    do: %{hour: h, minute: m, second: s}
+  defp parse_time(now, hm: [h, m]) do
+    now
+    |> Timex.set(hour: h, minute: m, second: 0)
+    |> to_time()
+  end
+
+  defp to_time(datetime) do
+    {datetime.hour, datetime.minute, datetime.second}
+  end
 end

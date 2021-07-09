@@ -21,7 +21,8 @@ defmodule NaturalTime.MixProject do
   # Run "mix help deps" to learn about dependencies.
   defp deps do
     [
-      {:timex, "~> 3.5"}
+      {:timex, "~> 3.5"},
+      {:nimble_parsec, "~> 1.1"}
     ]
   end
 end
